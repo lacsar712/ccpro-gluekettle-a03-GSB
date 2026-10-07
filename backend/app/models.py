@@ -36,6 +36,7 @@ class Kettle(SQLModel, table=True):
     bench: int = 0
     workshop: Optional[Workshop] = Relationship(back_populates="kettles")
     cooks: list["CookLog"] = Relationship(back_populates="kettle")
+    boil_starts: list["BoilStart"] = Relationship(back_populates="kettle")
 
 
 class CookLog(SQLModel, table=True):
@@ -45,3 +46,16 @@ class CookLog(SQLModel, table=True):
     peak_temp_c: float
     operator: str = ""
     kettle: Optional[Kettle] = Relationship(back_populates="cooks")
+
+
+class BoilStart(SQLModel, table=True):
+    """开火台账：每次 冷锅→熬煮中 成功落一笔，供并发抢交时核对只许一笔。"""
+
+    __tablename__ = "boil_start"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    kettle_id: int = Field(foreign_key="kettle.id")
+    started_at: datetime = Field(default_factory=utcnow)
+    operator: str = ""
+    peak_temp_c: Optional[float] = None
+    kettle: Optional[Kettle] = Relationship(back_populates="boil_starts")
