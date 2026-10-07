@@ -17,7 +17,9 @@ async function api(path, options = {}) {
 const app = document.getElementById("app");
 const state = {
   ready: Boolean(localStorage.getItem(TOKEN_KEY)),
+  view: "board",
   board: null,
+  heat: null,
   picked: null,
   peak: "96",
   err: "",
@@ -37,6 +39,63 @@ async function refresh() {
     state.picked = state.board.kettles.find((k) => k.id === state.picked.id) || state.board.kettles[0];
   }
   render();
+}
+
+async function refreshHeat() {
+  state.heat = await api("/api/heat");
+}
+
+function navHtml() {
+  return `<nav class="top">
+    <span class="brand">骨巷熬胶坊</span>
+    <button data-v="board" class="${state.view === "board" ? "on" : ""}">锅位作业台</button>
+    <button data-v="heat" class="${state.view === "heat" ? "on" : ""}">火候台</button>
+  </nav>`;
+}
+
+function bindNav(box) {
+  box.querySelectorAll("nav.top [data-v]").forEach((b) => {
+    b.onclick = async () => {
+      if (state.view === b.dataset.v) return;
+      state.view = b.dataset.v;
+      state.err = "";
+      try {
+        if (state.view === "heat") await refreshHeat();
+        else await refresh();
+      } catch (ex) {
+        state.err = ex.message;
+      }
+      render();
+    };
+  });
+}
+
+function heatHtml() {
+  if (!state.heat) return `<p>装载火候…</p>`;
+  return state.heat.workshops
+    .map(
+      (w) => `<section class="shop">
+      <h2>${w.workshop} · ${w.alley}</h2>
+      <table class="heat">
+        <thead>
+          <tr><th>锅位</th><th>状态</th><th>最近峰值 ℃</th><th>与熬煮邻锅差值 ℃</th></tr>
+        </thead>
+        <tbody>
+          ${w.kettles
+            .map(
+              (k) => `<tr>
+            <td>${k.code}</td>
+            <td><span class="chip ${k.status}">${LABELS[k.status] || k.status}</span></td>
+            <td>${k.latestPeakC ?? "—"}</td>
+            <td>${k.diffC ?? "—"}</td>
+          </tr>`
+            )
+            .join("")}
+        </tbody>
+      </table>
+    </section>`
+    )
+    .join("");
 }
 
 function render() {
@@ -74,27 +133,45 @@ function render() {
       } catch (ex) {
         state.err = ex.message;
         render();
+        return;
       }
+      render();
     };
     app.append(box);
     return;
   }
+  if (state.view === "heat") {
+    const box = el(`<div class="wrap">
+      ${navHtml()}
+      <h1>火候台</h1>
+      <p>只读专页 · 按坊列出各锅最近峰值与对邻熬煮锅的差值（上限 12℃）</p>
+      ${heatHtml()}
+      <p class="err">${state.err}</p>
+    </div>`);
+    bindNav(box);
+    app.append(box);
+    return;
+  }
   if (!state.board) {
-    app.append(el(`<div class="wrap">${state.err || "装载锅位…"}</div>`));
+    app.append(el(`<div class="wrap">${navHtml()}${state.err || "装载锅位…"}</div>`));
+    bindNav(app.querySelector(".wrap"));
     return;
   }
   const box = el(`<div class="wrap">
+    ${navHtml()}
     <h1>${state.board.workshop}</h1>
-    <p>${state.board.alley} · 点锅登记峰值；出胶须最近峰值 ≥ 90℃</p>
+    <p>${state.board.alley} · 点锅登记峰值；出胶须最近峰值 ≥ 90℃；改熬煮中须与邻熬煮锅峰值差 ≤ 12℃</p>
     <div class="row"></div>
     <section class="drawer"></section>
     <p class="err">${state.err}</p>
   </div>`);
+  bindNav(box);
   const row = box.querySelector(".row");
   state.board.kettles.forEach((k) => {
     const btn = el(`<button class="kettle ${k.status}"><strong>${k.code}</strong><span>${LABELS[k.status]}</span></button>`);
     btn.onclick = () => {
       state.picked = k;
+      state.err = "";
       render();
     };
     row.append(btn);
@@ -125,6 +202,7 @@ function render() {
       }
     };
     d.querySelectorAll("[data-s]").forEach((b) => {
+      if (b.dataset.s === state.picked.status) b.disabled = true;
       b.onclick = async () => {
         state.err = "";
         try {
